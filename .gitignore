@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+venv/
+.venv/
+env/
+
+# Node/Vite
+frontend/node_modules/
+frontend/dist/
+
+# Runtime data
+uploads/
+api/uploads/
+outputs/gradcam/
+*.db
+*.sqlite
+*.sqlite3
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Keep production model artifacts under outputs/ tracked intentionally.
+!outputs/
+!outputs/*.pth
+!outputs/*.json
+!outputs/*.png
+
+# Virtual Environment
+venv/
+
+# Datasets
+data/
+research_aug_dataset/
+research_patient_safe_aug_dataset/
+
+# Uploads
+uploads/
+
+# Python cache
+__pycache__/
+.pytest_cache/
+
+# Logs
+*.log
+
+# Model checkpoints
+outputs/*.pth
+
+# Generated GradCAM images
+outputs/*gradcam*.pngvenv/
+
+research_aug_dataset/
+research_patient_safe_aug_dataset/
+
+uploads/
+
+outputs/*.pth
+
+__pycache__/
+.pytest_cache/
+*.h5
