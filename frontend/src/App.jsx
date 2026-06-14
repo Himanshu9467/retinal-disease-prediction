@@ -16,9 +16,11 @@ import {
   CheckCircle2,
   ClipboardList,
   Eye,
+  EyeOff,
   FileClock,
   History,
   LineChart,
+  Lock,
   LogOut,
   Mail,
   Moon,
@@ -47,9 +49,7 @@ const THEME_KEY = "retina-dashboard-theme";
 
 const RISK_META = {
   Normal: { tone: "normal", priority: 1 },
-  "At Risk": { tone: "atrisk", priority: 2 },
-  "At-Risk": { tone: "atrisk", priority: 2 },
-  "Disease Detected": { tone: "critical", priority: 3 },
+  Disease: { tone: "critical", priority: 2 },
 };
 
 const NAV_ITEMS = [
@@ -62,7 +62,7 @@ const NAV_ITEMS = [
 ];
 
 const CARE_GUIDANCE = {
-  "Disease Detected": {
+  Disease: {
     title: "First Phase Response",
     urgency: "Arrange same-day clinical review and confirm the finding with a doctor.",
     steps: [
@@ -82,29 +82,6 @@ const CARE_GUIDANCE = {
       "Vegetables, fruits, beans/lentils, oats, whole grains, nuts, and seeds.",
       "Fish or lean protein where appropriate, and low-fat dairy if tolerated.",
       "Low-salt meals; avoid processed snacks, sugary drinks, bakery items, and deep-fried foods.",
-    ],
-  },
-  "At-Risk": {
-    title: "Risk Reduction Plan",
-    urgency: "Book routine follow-up and start lifestyle changes now to reduce modifiable risk.",
-    steps: [
-      "Track blood pressure and repeat cholesterol/glucose screening as advised by a clinician.",
-      "Set a weekly activity goal: brisk walking or similar moderate activity on most days if medically safe.",
-      "Review sleep, stress, smoking, alcohol, weight, and family history during follow-up.",
-      "Re-screen on schedule so risk movement can be compared over time.",
-    ],
-    precautions: [
-      "Do not self-medicate for blood pressure, cholesterol, or diabetes.",
-      "Reduce sitting time and avoid sudden intense exercise if the patient has symptoms.",
-      "Stop smoking or tobacco use; ask the care team for quit support.",
-      "Limit alcohol and keep salt, added sugar, and saturated/trans fat low.",
-    ],
-    foodsTitle: "Eat More Often",
-    foods: [
-      "Half plate vegetables and fruit, especially leafy greens and high-fiber choices.",
-      "Whole grains such as oats, brown rice, millet, whole wheat, and high-fiber cereals.",
-      "Beans, lentils, chickpeas, nuts, seeds, fish, skinless poultry, or other lean proteins.",
-      "Use unsaturated oils in small amounts; choose steamed, grilled, boiled, or roasted foods.",
     ],
   },
   Normal: {
@@ -237,8 +214,8 @@ function confidenceBand(value) {
 function compactModelSource(path) {
   if (!path) return "--";
   const parts = String(path).split(/[\\/]+/);
-  const outputsIndex = parts.findIndex((part) => part === "outputs");
-  return outputsIndex >= 0 ? parts.slice(outputsIndex).join("/") : parts.slice(-2).join("/");
+  const outputIndex = parts.findIndex((part) => part === "research_training_outputs2");
+  return outputIndex >= 0 ? parts.slice(outputIndex).join("/") : parts.slice(-2).join("/");
 }
 
 function withinTimeFilter(timestamp, filter) {
@@ -371,6 +348,9 @@ function AuthView({ onLogin, notice = "" }) {
   const [mode, setMode] = useState("login");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [registerForm, setRegisterForm] = useState({
@@ -383,13 +363,14 @@ function AuthView({ onLogin, notice = "" }) {
   const submitLogin = async (event) => {
     event.preventDefault();
     setError("");
+    setSuccess("");
     setBusy(true);
     try {
       const response = await apiRequest("/auth/login", {
         method: "POST",
         body: loginForm,
       });
-      onLogin(response.access_token, response.user);
+      onLogin(response.access_token, response.user, rememberMe);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -400,6 +381,7 @@ function AuthView({ onLogin, notice = "" }) {
   const submitRegister = async (event) => {
     event.preventDefault();
     setError("");
+    setSuccess("");
     setBusy(true);
     try {
       await apiRequest("/auth/register", {
@@ -408,6 +390,7 @@ function AuthView({ onLogin, notice = "" }) {
       });
       setMode("login");
       setLoginForm((prev) => ({ ...prev, email: registerForm.email }));
+      setSuccess("Account created. Sign in with your new clinical profile.");
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -417,124 +400,300 @@ function AuthView({ onLogin, notice = "" }) {
 
   return (
     <main className="auth-shell">
-      <section className="auth-card">
-        <header className="auth-title">
-          <h1>RetinaRisk Clinical Console</h1>
-          <p>Retinal image severity screening workspace</p>
-        </header>
-        {notice ? <div className="form-error auth-notice">{notice}</div> : null}
+      <section className="auth-experience" aria-label="CardioVision AI authentication">
+        <div className="auth-hero">
+          <div className="auth-brand">
+            <div className="auth-brand-mark" aria-hidden="true">
+              <Eye size={24} />
+            </div>
+            <div>
+              <span>CardioVision AI</span>
+              <strong>Early Detection Through Retinal Intelligence</strong>
+            </div>
+          </div>
 
-        <div className="auth-mode">
-          <button
-            className={mode === "login" ? "active" : ""}
-            onClick={() => setMode("login")}
-            type="button"
-          >
-            Sign In
-          </button>
-          <button
-            className={mode === "register" ? "active" : ""}
-            onClick={() => setMode("register")}
-            type="button"
-          >
-            Register
-          </button>
+          <div className="auth-hero-copy">
+            <span className="auth-eyebrow">Clinical AI Platform</span>
+            <h1>CardioVision AI</h1>
+            <p>
+              AI-Powered Cardiovascular Disease Risk Assessment Through Retinal Image Analysis
+            </p>
+          </div>
+
+          <div className="auth-platform-preview" aria-label="AI platform preview">
+            <div className="fundus-preview">
+              <div className="fundus-image" aria-hidden="true">
+                <span className="optic-disc" />
+                <span className="fundus-vessel vessel-a" />
+                <span className="fundus-vessel vessel-b" />
+                <span className="fundus-vessel vessel-c" />
+                <span className="gradcam-heat heat-a" />
+                <span className="gradcam-heat heat-b" />
+                <span className="scan-beam" />
+              </div>
+              <div className="fundus-caption">
+                <span>Retina Fundus + GradCAM</span>
+                <strong>Explainable screening preview</strong>
+              </div>
+            </div>
+
+            <div className="auth-ai-grid">
+              <div className="ai-widget risk-score">
+                <span>Disease Risk Score</span>
+                <strong>0.31</strong>
+                <small>Normal band</small>
+              </div>
+              <div className="ai-widget confidence-score">
+                <span>Model Confidence</span>
+                <strong>95.14%</strong>
+                <small>EfficientNet-B3</small>
+              </div>
+              <div className="ai-widget screening-status">
+                <span>AI Screening</span>
+                <strong>Active</strong>
+                <small>Real-time inference ready</small>
+              </div>
+              <div className="ai-widget analytics-widget">
+                <span>Clinical AI Analytics</span>
+                <div className="mini-bars" aria-hidden="true">
+                  <i style={{ height: "42%" }} />
+                  <i style={{ height: "68%" }} />
+                  <i style={{ height: "54%" }} />
+                  <i style={{ height: "82%" }} />
+                </div>
+              </div>
+            </div>
+
+            <div className="auth-model-strip">
+              <div>
+                <span>Production Model</span>
+                <strong>EfficientNet-B3</strong>
+              </div>
+              <div>
+                <span>Dataset</span>
+                <strong>7000 Patient-Safe Images</strong>
+              </div>
+            </div>
+
+            <div className="auth-model-list" aria-label="Deep learning model information">
+              {["EfficientNet-B3", "ResNet50", "MobileNetV3-Large", "CNN", "Ensemble"].map(
+                (model) => (
+                  <span key={model}>{model}</span>
+                )
+              )}
+            </div>
+          </div>
         </div>
 
-        {mode === "login" ? (
-          <form onSubmit={submitLogin} className="form-grid">
-            <label>
-              <span>Email</span>
-              <input
-                type="email"
-                value={loginForm.email}
-                onChange={(event) =>
-                  setLoginForm((prev) => ({ ...prev, email: event.target.value }))
-                }
-                required
-              />
-            </label>
-            <label>
-              <span>Password</span>
-              <input
-                type="password"
-                value={loginForm.password}
-                onChange={(event) =>
-                  setLoginForm((prev) => ({
-                    ...prev,
-                    password: event.target.value,
-                  }))
-                }
-                required
-              />
-            </label>
-            {error ? <div className="form-error">{error}</div> : null}
-            <button className="btn btn-primary" disabled={busy} type="submit">
-              {busy ? "Signing in..." : "Sign In"}
+        <section className="auth-card" aria-label="Sign in panel">
+          <header className="auth-title">
+            <span className="secure-access-badge">
+              <ShieldCheck size={14} />
+              Secure Clinical Access
+            </span>
+            <h2>{mode === "login" ? "Welcome back" : "Create clinical profile"}</h2>
+            <p>
+              Advanced Deep Learning Platform for Cardiovascular Disease Risk Assessment
+              Using Retinal Fundus Imaging
+            </p>
+          </header>
+          {notice ? <div className="form-error auth-notice">{notice}</div> : null}
+          {success ? <div className="form-success auth-notice">{success}</div> : null}
+
+          <div className="auth-mode">
+            <button
+              className={mode === "login" ? "active" : ""}
+              onClick={() => {
+                setMode("login");
+                setError("");
+              }}
+              type="button"
+            >
+              Sign In
             </button>
-          </form>
-        ) : (
-          <form onSubmit={submitRegister} className="form-grid">
-            <label>
-              <span>Full Name</span>
-              <input
-                value={registerForm.name}
-                onChange={(event) =>
-                  setRegisterForm((prev) => ({ ...prev, name: event.target.value }))
-                }
-                required
-              />
-            </label>
-            <label>
-              <span>Email</span>
-              <input
-                type="email"
-                value={registerForm.email}
-                onChange={(event) =>
-                  setRegisterForm((prev) => ({ ...prev, email: event.target.value }))
-                }
-                required
-              />
-            </label>
-            <label>
-              <span>Password</span>
-              <input
-                type="password"
-                value={registerForm.password}
-                onChange={(event) =>
-                  setRegisterForm((prev) => ({
-                    ...prev,
-                    password: event.target.value,
-                  }))
-                }
-                required
-              />
-            </label>
-            <label>
-              <span>Role</span>
-              <select
-                value={registerForm.role}
-                onChange={(event) =>
-                  setRegisterForm((prev) => ({ ...prev, role: event.target.value }))
-                }
-              >
-                <option value="Doctor">Doctor</option>
-                <option value="Medical Staff">Medical Staff</option>
-              </select>
-            </label>
-            {error ? <div className="form-error">{error}</div> : null}
-            <button className="btn btn-primary" disabled={busy} type="submit">
-              {busy ? "Creating account..." : "Create Account"}
+            <button
+              className={mode === "register" ? "active" : ""}
+              onClick={() => {
+                setMode("register");
+                setError("");
+              }}
+              type="button"
+            >
+              Register
             </button>
-          </form>
-        )}
+          </div>
+
+          {mode === "login" ? (
+            <form onSubmit={submitLogin} className="form-grid auth-form">
+              <label>
+                <span>Email</span>
+                <div className="auth-input">
+                  <Mail size={17} />
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    placeholder="clinician@hospital.org"
+                    value={loginForm.email}
+                    onChange={(event) =>
+                      setLoginForm((prev) => ({ ...prev, email: event.target.value }))
+                    }
+                    required
+                  />
+                </div>
+              </label>
+              <label>
+                <span>Password</span>
+                <div className="auth-input">
+                  <Lock size={17} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    placeholder="Enter secure password"
+                    value={loginForm.password}
+                    onChange={(event) =>
+                      setLoginForm((prev) => ({
+                        ...prev,
+                        password: event.target.value,
+                      }))
+                    }
+                    required
+                  />
+                  <button
+                    className="password-toggle"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    type="button"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </label>
+              <div className="auth-options">
+                <label className="remember-control">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(event) => setRememberMe(event.target.checked)}
+                  />
+                  <span>Remember me</span>
+                </label>
+                <button
+                  className="forgot-link"
+                  onClick={() =>
+                    setError("Password recovery is handled by your system administrator.")
+                  }
+                  type="button"
+                >
+                  Forgot Password
+                </button>
+              </div>
+              {error ? <div className="form-error">{error}</div> : null}
+              <button className="btn btn-primary auth-submit" disabled={busy} type="submit">
+                {busy ? (
+                  <>
+                    <RefreshCw size={17} className="spin" />
+                    Signing in...
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={17} />
+                    Sign In
+                  </>
+                )}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={submitRegister} className="form-grid auth-form">
+              <label>
+                <span>Full Name</span>
+                <div className="auth-input">
+                  <Stethoscope size={17} />
+                  <input
+                    autoComplete="name"
+                    placeholder="Dr. Anika Sharma"
+                    value={registerForm.name}
+                    onChange={(event) =>
+                      setRegisterForm((prev) => ({ ...prev, name: event.target.value }))
+                    }
+                    required
+                  />
+                </div>
+              </label>
+              <label>
+                <span>Email</span>
+                <div className="auth-input">
+                  <Mail size={17} />
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    placeholder="clinician@hospital.org"
+                    value={registerForm.email}
+                    onChange={(event) =>
+                      setRegisterForm((prev) => ({ ...prev, email: event.target.value }))
+                    }
+                    required
+                  />
+                </div>
+              </label>
+              <label>
+                <span>Password</span>
+                <div className="auth-input">
+                  <Lock size={17} />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Create secure password"
+                    value={registerForm.password}
+                    onChange={(event) =>
+                      setRegisterForm((prev) => ({
+                        ...prev,
+                        password: event.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </div>
+              </label>
+              <label>
+                <span>Role</span>
+                <div className="auth-input select-input">
+                  <ShieldCheck size={17} />
+                  <select
+                    value={registerForm.role}
+                    onChange={(event) =>
+                      setRegisterForm((prev) => ({ ...prev, role: event.target.value }))
+                    }
+                  >
+                    <option value="Doctor">Doctor</option>
+                    <option value="Medical Staff">Medical Staff</option>
+                  </select>
+                </div>
+              </label>
+              {error ? <div className="form-error">{error}</div> : null}
+              <button className="btn btn-primary auth-submit" disabled={busy} type="submit">
+                {busy ? (
+                  <>
+                    <RefreshCw size={17} className="spin" />
+                    Creating account...
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={17} />
+                    Create Account
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+        </section>
       </section>
     </main>
   );
 }
 
 function LegacyDashboardView({ patients, predictions, stats, onNavigate, onRefresh, refreshing }) {
-  const highRiskCount = (stats?.["At-Risk"] ?? 0) + (stats?.["Disease Detected"] ?? 0);
+  const highRiskCount = stats?.Disease ?? 0;
 
   const weeklyTrend = useMemo(() => {
     const buckets = Array.from({ length: 7 }, (_, idx) => {
@@ -772,7 +931,6 @@ function LegacyDashboardView({ patients, predictions, stats, onNavigate, onRefre
         <select className="alert-filter" defaultValue="all">
           <option value="all">All Patients</option>
           <option value="critical">Critical</option>
-          <option value="atrisk">Attention</option>
         </select>
         <div className="alert-list">
           {highRiskQueue.length === 0 ? (
@@ -787,7 +945,7 @@ function LegacyDashboardView({ patients, predictions, stats, onNavigate, onRefre
               >
                 <strong>
                   {row.PatientName || `Patient ${row.PatientID}`} -{" "}
-                  {row.PredictionResult === "Disease Detected" ? "Critical" : "Attention"}
+                  Critical
                 </strong>
                 <span>
                   {row.PredictionResult} · {formatPercent(Number(row.ConfidenceScore || 0))} confidence
@@ -868,8 +1026,7 @@ function DashboardView({
 
   const totalPredictions = filteredPredictions.length;
   const normalCount = filteredPredictions.filter((row) => row.PredictionResult === "Normal").length;
-  const atRiskCount = filteredPredictions.filter((row) => row.PredictionResult === "At-Risk").length;
-  const diseaseCount = filteredPredictions.filter((row) => row.PredictionResult === "Disease Detected").length;
+  const diseaseCount = filteredPredictions.filter((row) => row.PredictionResult === "Disease").length;
   const trend = useMemo(() => riskTrend(filteredPredictions), [filteredPredictions]);
 
   const highRiskQueue = useMemo(
@@ -953,41 +1110,34 @@ function DashboardView({
 
   const filteredHighRiskQueue = useMemo(() => {
     if (alertFilter === "critical") {
-      return highRiskQueue.filter((row) => row.PredictionResult === "Disease Detected");
-    }
-    if (alertFilter === "atrisk") {
-      return highRiskQueue.filter((row) => row.PredictionResult === "At-Risk");
+      return highRiskQueue.filter((row) => row.PredictionResult === "Disease");
     }
     return highRiskQueue;
   }, [alertFilter, highRiskQueue]);
 
   const thresholdRows = [
     {
-      label: "Model Target",
-      value: "Retinal image severity",
-      normal: "Dataset level 0",
-      warning: "Dataset levels 1-2",
-      danger: "Dataset levels 3-4",
+      label: "Normal Probability",
+      value: "P(Normal)",
+      detail: "Routine screening target",
+      tone: "normal",
     },
     {
-      label: "Output Classes",
-      value: "3-class screening",
-      normal: "Normal",
-      warning: "At-Risk",
-      danger: "Disease Detected",
+      label: "Disease Probability",
+      value: "P(Disease)",
+      detail: "Review required target",
+      tone: "critical",
     },
     {
-      label: "Clinical Meaning",
-      value: "Decision support",
-      normal: "Not a diagnosis",
-      warning: "Needs follow-up",
-      danger: "Confirm clinically",
+      label: "Decision Threshold",
+      value: "0.50",
+      detail: "Disease when P(Disease) >= 50%",
+      tone: "critical",
     },
   ];
   const riskPercentRows = [
-    { label: "Normal", count: normalCount, tone: "normal", range: "0-39%" },
-    { label: "At-Risk", count: atRiskCount, tone: "atrisk", range: "40-69%" },
-    { label: "Disease Detected", count: diseaseCount, tone: "critical", range: "70-100%" },
+    { label: "Normal", count: normalCount, tone: "normal", range: "P(Normal)" },
+    { label: "Disease", count: diseaseCount, tone: "critical", range: "P(Disease)" },
   ];
   const latestActivities = filteredPredictions.slice(0, 3).map((row) => ({
     title: row.PredictionResult,
@@ -1207,17 +1357,28 @@ function DashboardView({
           <div className="care-panel-head">
             <div>
               <h3>Retinal Severity Target</h3>
-              <p>How dataset labels are mapped into model outputs.</p>
+              <p>Professional target mapping for the binary retinal screening model.</p>
             </div>
+            <span className="model-badge">Best Performing Production Model: EfficientNet-B3</span>
           </div>
           <div className="threshold-grid">
             {thresholdRows.map((item) => (
-              <div className="threshold-card" key={item.label}>
-                <span>{item.label}</span>
+              <div className={`threshold-card ${item.tone}`} key={item.label}>
+                <div className="threshold-card-head">
+                  <span>{item.label}</span>
+                  <small className={item.tone}>{item.detail}</small>
+                </div>
                 <strong>{item.value}</strong>
-                <small className="normal">{item.normal}</small>
-                <small className="atrisk">{item.warning}</small>
-                <small className="critical">{item.danger}</small>
+                <div className="threshold-confidence">
+                  <span>Confidence indicator</span>
+                  <b>{item.tone === "normal" ? "Low risk" : "Clinical review"}</b>
+                </div>
+                <div className="bar-track">
+                  <div
+                    className={`bar-fill ${item.tone}`}
+                    style={{ width: item.tone === "normal" ? "62%" : "78%" }}
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -1267,8 +1428,8 @@ function DashboardView({
             </p>
             <div className="cvd-points">
               <span>The output is a learned image-severity class.</span>
-              <span>At-risk results should trigger retinal and clinical review.</span>
-              <span>Disease detected results need prompt clinician confirmation.</span>
+              <span>Disease results should trigger retinal and clinical review.</span>
+              <span>Disease results need prompt clinician confirmation.</span>
             </div>
             <button className="submit-order-btn" type="button" onClick={() => onNavigate("screening")}>
               Start Screening
@@ -1292,11 +1453,7 @@ function DashboardView({
                 <span>Maintain routine monitoring and healthy habits.</span>
               </div>
               <div>
-                <strong>At-Risk</strong>
-                <span>Schedule follow-up and review clinical risk factors.</span>
-              </div>
-              <div>
-                <strong>Disease Detected</strong>
+                <strong>Disease</strong>
                 <span>Arrange prompt doctor or ophthalmology review.</span>
               </div>
             </div>
@@ -1315,8 +1472,7 @@ function DashboardView({
           onChange={(event) => setAlertFilter(event.target.value)}
         >
           <option value="all">All risk results</option>
-          <option value="critical">Disease detected</option>
-          <option value="atrisk">At-risk</option>
+          <option value="critical">Disease</option>
         </select>
         <div className="alert-list">
           {filteredHighRiskQueue.length === 0 ? (
@@ -1331,7 +1487,7 @@ function DashboardView({
               >
                 <strong>
                   {row.PatientName || `Patient ${row.PatientID}`} -{" "}
-                  {row.PredictionResult === "Disease Detected" ? "Critical" : "Attention"}
+                  Critical
                 </strong>
                 <span>{row.PredictionResult} - {formatPercent(Number(row.ConfidenceScore || 0))} confidence</span>
               </button>
@@ -1429,17 +1585,8 @@ function MedicationsView({ patients, predictions }) {
         "Repeat screening on schedule or earlier if symptoms appear.",
       ],
     },
-    "At-Risk": {
-      title: "At-Risk Precautions",
-      medicines:
-        "Doctor may review retinal findings and relevant clinical risk factors before deciding care.",
-      precautions: [
-        "Reduce salt, fried foods, tobacco, alcohol excess, and added sugar.",
-        "Plan follow-up for BP, lipid profile, fasting glucose or HbA1c, and lifestyle counseling.",
-      ],
-    },
-    "Disease Detected": {
-      title: "Disease Detected Precautions",
+    Disease: {
+      title: "Disease Precautions",
       medicines:
         "Urgent clinician review is needed. Statins, BP medicines, antiplatelets, or diabetes medicines must only be started or changed by a doctor.",
       precautions: [
@@ -1642,13 +1789,21 @@ function ScreeningView({ token, patients, onPredictionSaved, notify }) {
   };
 
   const finalRisk = result?.retinal_severity || result?.result || result?.cvd_risk || "";
-  const ensembleConfidence = Number(result?.ensemble_confidence ?? result?.confidence ?? 0);
-  const ensembleProbability = Number(result?.ensemble_probability ?? ensembleConfidence);
-  const ensembleProbabilities =
-    result?.ensemble_probabilities || result?.class_probabilities || {};
+  const productionConfidence = Number(
+    result?.production_confidence ?? result?.confidence ?? result?.ensemble_confidence ?? 0
+  );
+  const productionProbability = Number(
+    result?.risk_score ?? result?.production_probabilities?.Disease ?? productionConfidence
+  );
+  const productionProbabilities =
+    result?.production_probabilities || result?.class_probabilities || {};
   const individualPredictions = Object.values(
     result?.individual_model_predictions || result?.models || {}
   );
+  const predictionSource = result?.prediction_source
+    ? formatKeyLabel(result.prediction_source)
+    : "Efficientnet";
+  const productionModel = result?.production_model || "EfficientNet-B3";
   const explainabilityMaps = Object.entries(result?.explainability || {}).filter(
     ([, value]) => Boolean(value)
   );
@@ -1825,7 +1980,7 @@ function ScreeningView({ token, patients, onPredictionSaved, notify }) {
               <div className="result-kpi-grid">
                 <div className="result-kpi">
                   <span>Confidence</span>
-                  <strong>{formatPercent(ensembleConfidence, 2)}</strong>
+                  <strong>{formatPercent(productionConfidence, 2)}</strong>
                 </div>
                 <div className="result-kpi">
                   <span>Predicted Class</span>
@@ -1833,7 +1988,7 @@ function ScreeningView({ token, patients, onPredictionSaved, notify }) {
                 </div>
                 <div className="result-kpi">
                   <span>Ensemble Probability</span>
-                  <strong>{formatPercent(ensembleProbability, 2)}</strong>
+                  <strong>{formatPercent(productionProbability, 2)}</strong>
                 </div>
                 <div className="result-kpi">
                   <span>Severity Score</span>
@@ -1844,6 +1999,8 @@ function ScreeningView({ token, patients, onPredictionSaved, notify }) {
               <div className="result-summary-row">
                 <span>Severity Band: {result.probability_risk_band || "--"}</span>
                 <span>Model Agreement: {result.model_agreement || "--"}</span>
+                <span>Prediction Source: {predictionSource}</span>
+                <span>Production Model: {productionModel}</span>
               </div>
 
               {result.target_description ? (
@@ -1853,7 +2010,7 @@ function ScreeningView({ token, patients, onPredictionSaved, notify }) {
               <CareGuidancePanel risk={finalRisk} />
 
               <div className="risk-list">
-                {Object.entries(ensembleProbabilities).map(([label, score]) => (
+                {Object.entries(productionProbabilities).map(([label, score]) => (
                   <div key={label} className="risk-row">
                     <div className="risk-row-head">
                       <span>{label}</span>
@@ -2258,8 +2415,7 @@ function HistoryView({
           <select value={riskFilter} onChange={(event) => setRiskFilter(event.target.value)}>
             <option value="all">All outcomes</option>
             <option value="Normal">Normal</option>
-            <option value="At-Risk">At-Risk</option>
-            <option value="Disease Detected">Disease Detected</option>
+            <option value="Disease">Disease</option>
           </select>
         </div>
         {actionError ? <div className="form-error history-error">{actionError}</div> : null}
@@ -2348,12 +2504,10 @@ function AnalyticsView({ token, predictions, stats, models, onRefresh }) {
 
   const total = stats?.total || 0;
   const normal = stats?.Normal || 0;
-  const atrisk = stats?.["At-Risk"] || 0;
-  const critical = stats?.["Disease Detected"] || 0;
+  const critical = stats?.Disease || 0;
   const donutBackground = `conic-gradient(
     var(--normal) 0 ${(total ? (normal / total) * 100 : 0).toFixed(2)}%,
-    var(--atrisk) ${(total ? (normal / total) * 100 : 0).toFixed(2)}% ${(total ? ((normal + atrisk) / total) * 100 : 0).toFixed(2)}%,
-    var(--critical) ${(total ? ((normal + atrisk) / total) * 100 : 0).toFixed(2)}% 100%
+    var(--critical) ${(total ? (normal / total) * 100 : 0).toFixed(2)}% 100%
   )`;
 
   const modelComparison = useMemo(
@@ -2375,7 +2529,7 @@ function AnalyticsView({ token, predictions, stats, models, onRefresh }) {
     <section className="view">
       <PanelHeader
         title="Analytics"
-        subtitle="Distribution, confidence profile, and latest outputs/ model metadata"
+        subtitle="Distribution, confidence profile, and latest production model metadata"
       />
 
       <div className="panel-grid">
@@ -2388,10 +2542,7 @@ function AnalyticsView({ token, predictions, stats, models, onRefresh }) {
                 <RiskPill value="Normal" /> <span>{normal}</span>
               </div>
               <div>
-                <RiskPill value="At-Risk" /> <span>{atrisk}</span>
-              </div>
-              <div>
-                <RiskPill value="Disease Detected" /> <span>{critical}</span>
+                <RiskPill value="Disease" /> <span>{critical}</span>
               </div>
             </div>
           </div>
@@ -2426,8 +2577,8 @@ function AnalyticsView({ token, predictions, stats, models, onRefresh }) {
 
         <article className="panel full-span">
           <PanelHeader
-            title="Latest Outputs Metrics"
-            subtitle="Accuracy, precision, recall, and F1 score from the active outputs/ registry"
+            title="Production Model Metrics"
+            subtitle="Accuracy, precision, recall, and F1 score from research_training_outputs2"
           />
           {modelComparison.length === 0 ? (
             <p className="empty">No model metrics available yet.</p>
@@ -2459,7 +2610,7 @@ function AnalyticsView({ token, predictions, stats, models, onRefresh }) {
         <article className="panel full-span">
           <PanelHeader
             title="Model Registry"
-            subtitle="Server-side entries synced from outputs/"
+            subtitle="Server-side entries synced from research_training_outputs2"
             actions={
               <button
                 className="btn btn-ghost"
@@ -2627,14 +2778,18 @@ export default function App() {
     };
   }, []);
 
-  const handleLogin = (nextToken, nextUser) => {
+  const handleLogin = (nextToken, nextUser, remember = true) => {
     setToken(nextToken);
     setUser(nextUser);
     setAuthNotice("");
-    localStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({ token: nextToken, user: nextUser })
-    );
+    if (remember) {
+      localStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({ token: nextToken, user: nextUser })
+      );
+    } else {
+      localStorage.removeItem(SESSION_KEY);
+    }
   };
 
   const logout = () => {
@@ -2781,12 +2936,11 @@ export default function App() {
               token={token}
               predictions={predictions}
               stats={
-                stats || {
-                  total: 0,
-                  Normal: 0,
-                  "At-Risk": 0,
-                  "Disease Detected": 0,
-                }
+              stats || {
+                total: 0,
+                Normal: 0,
+                  Disease: 0,
+              }
               }
               models={models}
               onRefresh={refreshData}

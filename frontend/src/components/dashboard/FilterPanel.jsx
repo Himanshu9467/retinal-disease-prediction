@@ -20,8 +20,7 @@ export default function FilterPanel({ filters, onChange }) {
       <select value={filters.risk} onChange={(event) => update("risk", event.target.value)}>
         <option value="all">All risk levels</option>
         <option value="Normal">Normal</option>
-        <option value="At-Risk">At-Risk</option>
-        <option value="Disease Detected">Disease Detected</option>
+        <option value="Disease">Disease</option>
       </select>
       <select value={filters.time} onChange={(event) => update("time", event.target.value)}>
         <option value="all">All time</option>

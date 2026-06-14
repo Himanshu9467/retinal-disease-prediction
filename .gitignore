@@ -1,70 +1,63 @@
+# Environment and secrets
+.env
+.env.local
+.env.production
+
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# Local environments
+dist/
+build/
 venv/
 .venv/
 env/
 
-# Node/Vite
+# Node / frontend
+node_modules/
 frontend/node_modules/
 frontend/dist/
 
-# Runtime data
-uploads/
-api/uploads/
-outputs/gradcam/
+# Database
 *.db
 *.sqlite
 *.sqlite3
 
-# OS/editor
-.DS_Store
-Thumbs.db
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Keep production model artifacts under outputs/ tracked intentionally.
-!outputs/
-!outputs/*.pth
-!outputs/*.json
-!outputs/*.png
-
-# Virtual Environment
-venv/
-
-# Datasets
-data/
-research_aug_dataset/
-research_patient_safe_aug_dataset/
-
-# Uploads
-uploads/
-
-# Python cache
-__pycache__/
-.pytest_cache/
+# OS
+Thumbs.db
+.DS_Store
 
 # Logs
 *.log
+*.err.log
 
-# Model checkpoints
-outputs/*.pth
-
-# Generated GradCAM images
-outputs/*gradcam*.pngvenv/
-
-research_aug_dataset/
-research_patient_safe_aug_dataset/
-
+# Local uploads and generated explainability
 uploads/
+api/uploads/
+outputs/gradcam/
+research_training_outputs2/gradcam/
 
+# Local datasets and generated training artifacts
+data/
+research_aug_dataset/
+research_binary_7000/
+research_patient_safe_aug_dataset/
+research_training_outputs2/
+runs/
+
+# Large local model artifacts
+*.h5
 outputs/*.pth
 
-__pycache__/
-.pytest_cache/
-*.h5
+# Accidental local shell/editor artifacts
+notepad .env

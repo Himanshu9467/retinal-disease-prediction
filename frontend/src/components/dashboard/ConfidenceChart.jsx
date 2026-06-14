@@ -1,6 +1,6 @@
 const BANDS = [
   { key: "low", label: "Low", tone: "neutral", min: 0, max: 0.6 },
-  { key: "medium", label: "Medium", tone: "atrisk", min: 0.6, max: 0.8 },
+  { key: "medium", label: "Medium", tone: "neutral", min: 0.6, max: 0.8 },
   { key: "high", label: "High", tone: "normal", min: 0.8, max: Infinity },
 ];
 

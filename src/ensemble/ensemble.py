@@ -1,4 +1,4 @@
-"""Weighted inference ensemble for RetinaRisk AI."""
+"""Production inference service for RetinaRisk AI."""
 
 import base64
 import io
@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
 
-from gradcam import GradCAM, ViTAttentionRollout, get_target_layer, overlay_cam
+from gradcam import GradCAM, get_target_layer, overlay_cam
 from model_registry import (
     build_model_registry,
     registry_as_dict,
@@ -23,22 +23,24 @@ from production_models import build_final_model
 
 LOGGER = logging.getLogger(__name__)
 
-CLASS_NAMES = ["At-Risk", "Disease Detected", "Normal"]
-CLASS_KEYS = ["at_risk", "disease_detected", "normal"]
+CLASS_NAMES = ["Normal", "Disease"]
+CLASS_KEYS = ["normal", "disease_detected"]
 DEFAULT_WEIGHTS = {
-    "efficientnet": 1.4,
-    "resnet": 1.4,
-    "vit": 1.1,
-    "cnn": 0.0,
+    "efficientnet": 0.50,
+    "resnet": 0.20,
+    "mobilenet": 0.20,
+    "cnn": 0.10,
 }
+PRODUCTION_PREDICTION_SOURCE = "efficientnet"
+PRODUCTION_MODEL_NAME = "EfficientNet-B3"
 TEMPERATURE = {
-    "efficientnet": 1.3,
-    "resnet": 1.4,
-    "vit": 1.5,
+    "efficientnet": 1.0,
+    "resnet": 1.0,
+    "mobilenet": 1.0,
     "cnn": 1.0,
 }
 MODEL_TEMPERATURES = TEMPERATURE
-ACTIVE_ENSEMBLE_MODELS = {"efficientnet", "resnet", "vit"}
+FALLBACK_ORDER = ("efficientnet", "resnet", "mobilenet", "cnn")
 
 
 def _project_root() -> Path:
@@ -66,7 +68,7 @@ class RetinalRiskEnsemble:
         self.img_size = img_size
         self.device = torch.device(device or "cpu")
         self.enable_explainability = enable_explainability
-        self.output_dir = Path(output_dir) if output_dir else _project_root() / "outputs"
+        self.output_dir = Path(output_dir) if output_dir else _project_root() / "research_training_outputs2"
         self.registry = registry or build_model_registry(strict=strict_registry)
         issues = validate_registry_paths(self.registry)
         if issues:
@@ -86,17 +88,13 @@ class RetinalRiskEnsemble:
         canonical = {}
         for key, value in weights.items():
             name = "cnn" if key in {"custom_cnn", "customcnn"} else key
-            if name in ACTIVE_ENSEMBLE_MODELS or name == "cnn":
+            if name in FALLBACK_ORDER:
                 canonical[name] = max(float(value), 0.0)
-        canonical["cnn"] = 0.0
-        total = sum(v for name, v in canonical.items() if name in ACTIVE_ENSEMBLE_MODELS and v > 0)
+        total = sum(v for name, v in canonical.items() if v > 0)
         if total <= 0:
             canonical = dict(DEFAULT_WEIGHTS)
-            total = sum(canonical[name] for name in ACTIVE_ENSEMBLE_MODELS)
-        return {
-            k: (v / total if k in ACTIVE_ENSEMBLE_MODELS and v > 0 else 0.0)
-            for k, v in canonical.items()
-        }
+            total = sum(canonical.values())
+        return {k: (v / total if v > 0 and total > 0 else 0.0) for k, v in canonical.items()}
 
     def _load_state_dict(self, model, checkpoint_path):
         try:
@@ -117,7 +115,7 @@ class RetinalRiskEnsemble:
         checkpoint_path = Path(checkpoint_path)
         if not checkpoint_path.exists() or not checkpoint_path.is_file():
             raise FileNotFoundError(f"Checkpoint not found for {model_name}: {checkpoint_path}")
-        model = build_final_model(model_name, num_classes=len(CLASS_NAMES))
+        model = build_final_model(model_name, num_classes=1)
         self._load_state_dict(model, checkpoint_path)
         model.to(self.device)
         model.eval()
@@ -125,14 +123,7 @@ class RetinalRiskEnsemble:
 
     def _load_models(self):
         loaded = {}
-        ordered_names = sorted(
-            [
-                name
-                for name, weight in self.model_weights.items()
-                if weight > 0 and name in ACTIVE_ENSEMBLE_MODELS and name in self.registry
-            ],
-            key=lambda name: self.registry[name].priority,
-        )
+        ordered_names = [name for name in FALLBACK_ORDER if name in self.registry]
         for model_name in ordered_names:
             entry = self.registry.get(model_name)
             if not entry:
@@ -153,10 +144,11 @@ class RetinalRiskEnsemble:
                 )
             except Exception as exc:
                 LOGGER.exception("Failed to load %s from %s: %s", model_name, checkpoint, exc)
-                raise RuntimeError(f"Registered production model failed to load: {model_name}") from exc
-        missing_registered = [name for name in ordered_names if name not in loaded]
-        if missing_registered:
-            raise RuntimeError(f"Registered production models were not loaded: {missing_registered}")
+                if model_name == "efficientnet":
+                    raise RuntimeError(f"Registered production model failed to load: {model_name}") from exc
+                LOGGER.warning("Fallback model %s is unavailable and will be skipped.", model_name)
+        if "efficientnet" not in loaded:
+            raise RuntimeError("Primary production model was not loaded: efficientnet")
         return loaded
 
     def preprocess_image(self, image):
@@ -190,9 +182,9 @@ class RetinalRiskEnsemble:
         return self.transform(pil_image).unsqueeze(0), pil_image
 
     def _risk_band(self, prediction, confidence):
-        if prediction == "Disease Detected":
+        if prediction == "Disease":
             return "high"
-        if prediction == "At-Risk" or confidence < 0.60:
+        if confidence < 0.60:
             return "medium"
         return "low"
 
@@ -213,15 +205,10 @@ class RetinalRiskEnsemble:
         if not self.enable_explainability:
             return None
         try:
-            if model_name == "vit":
-                rollout = ViTAttentionRollout(model)
-                heatmap = rollout.generate(tensor.clone().to(self.device))
-                rollout.remove_hooks()
-            else:
-                target_layer = get_target_layer(model, model_name)
-                cam = GradCAM(model, target_layer)
-                heatmap, _ = cam.generate(tensor.clone().to(self.device), target_class=target_class)
-                cam.remove_hooks()
+            target_layer = get_target_layer(model, model_name)
+            cam = GradCAM(model, target_layer)
+            heatmap, _ = cam.generate(tensor.clone().to(self.device), target_class=0)
+            cam.remove_hooks()
             return _to_data_url(overlay_cam(pil_image, heatmap))
         except Exception as exc:
             LOGGER.warning("GradCAM unavailable for %s: %s", model_name, exc)
@@ -240,12 +227,15 @@ class RetinalRiskEnsemble:
 
         weighted_sum = torch.zeros((1, len(CLASS_NAMES)), device=self.device)
         used_weight = 0.0
+        primary_probs = None
         individual = {}
 
-        for name, model in self.models.items():
-            weight = float(self.model_weights.get(name, 0.0))
-            if weight <= 0:
+        for name in FALLBACK_ORDER:
+            model = self.models.get(name)
+            if model is None:
+                LOGGER.warning("Model %s is unavailable during ensemble inference; skipping.", name)
                 continue
+            weight = float(self.model_weights.get(name, 0.0))
 
             logits = model(image_tensor)
             if not torch.isfinite(logits).all():
@@ -255,17 +245,20 @@ class RetinalRiskEnsemble:
             if temperature <= 0:
                 raise RuntimeError(f"Invalid calibration temperature for {name}: {temperature}")
 
-            calibrated_logits = logits.float() / float(temperature)
-
-            probs = F.softmax(calibrated_logits, dim=1)
+            calibrated_logits = logits.float().view(-1) / float(temperature)
+            disease_prob = torch.sigmoid(calibrated_logits).view(1, 1)
+            probs = torch.cat([1.0 - disease_prob, disease_prob], dim=1)
             probs = torch.nan_to_num(probs, nan=0.0, posinf=1.0, neginf=0.0)
             probs = probs / probs.sum(dim=1, keepdim=True).clamp_min(1e-12)
             if not torch.isfinite(probs).all():
                 raise RuntimeError(f"Non-finite probabilities produced by {name}")
 
-            weighted_sum += probs * weight
+            if weight > 0:
+                weighted_sum += probs * weight
+                used_weight += weight
 
-            used_weight += weight
+            if name == PRODUCTION_PREDICTION_SOURCE:
+                primary_probs = probs
 
             pred_idx = int(probs.argmax(dim=1).item())
             confidence = float(probs.max().item())
@@ -280,51 +273,86 @@ class RetinalRiskEnsemble:
                 },
             }
 
-        if used_weight <= 0:
-            raise RuntimeError("Loaded models have zero ensemble weight.")
+        if primary_probs is None:
+            primary = self.models.get(PRODUCTION_PREDICTION_SOURCE) or next(iter(self.models.values()))
+            logits = primary(image_tensor)
+            disease_prob = torch.sigmoid(logits.float().view(-1)).view(1, 1)
+            primary_probs = torch.cat([1.0 - disease_prob, disease_prob], dim=1)
 
-        final_probs = weighted_sum / used_weight
-        final_probs = torch.nan_to_num(final_probs, nan=0.0, posinf=1.0, neginf=0.0)
-        final_probs = final_probs / final_probs.sum(dim=1, keepdim=True).clamp_min(1e-12)
-        if not torch.isfinite(final_probs).all():
-            raise RuntimeError("Non-finite ensemble probabilities produced")
-        final_idx = int(final_probs.argmax(dim=1).item())
-        final_confidence = float(final_probs.max().item())
-        return final_idx, final_confidence, final_probs, individual
+        production_probs = primary_probs / primary_probs.sum(dim=1, keepdim=True).clamp_min(1e-12)
+        production_idx = int(production_probs.argmax(dim=1).item())
+        production_confidence = float(production_probs.max().item())
+
+        reference_probs = None
+        if used_weight > 0:
+            reference_probs = weighted_sum / used_weight
+            reference_probs = torch.nan_to_num(reference_probs, nan=0.0, posinf=1.0, neginf=0.0)
+            reference_probs = reference_probs / reference_probs.sum(dim=1, keepdim=True).clamp_min(1e-12)
+            if not torch.isfinite(reference_probs).all():
+                raise RuntimeError("Non-finite ensemble probabilities produced")
+
+        LOGGER.info(
+            "Production vote | Eff=%.4f Res=%.4f Mob=%.4f CNN=%.4f | Production Disease=%.4f",
+            individual.get("efficientnet", {}).get("probabilities", {}).get("Disease", -1),
+            individual.get("resnet", {}).get("probabilities", {}).get("Disease", -1),
+            individual.get("mobilenet", {}).get("probabilities", {}).get("Disease", -1),
+            individual.get("cnn", {}).get("probabilities", {}).get("Disease", -1),
+            float(production_probs[0, 1].item())
+        )
+        return production_idx, production_confidence, production_probs, individual, reference_probs
 
     def predict(self, image):
         tensor, pil_image = self.preprocess_image(image)
         return self._predict_from_tensor(tensor, pil_image)
 
     def _predict_from_tensor(self, tensor, pil_image):
-        final_idx, final_confidence, final_probs, individual = self.predict_tensor(tensor)
+        final_idx, final_confidence, final_probs, individual, reference_probs = self.predict_tensor(tensor)
         explanation = {}
-        for name, model in self.models.items():
+        for name in FALLBACK_ORDER:
+            model = self.models.get(name)
+            if model is None:
+                explanation[f"{name}_gradcam"] = None
+                continue
             data_url = self._gradcam(name, model, tensor, pil_image, final_idx)
-            if data_url:
-                explanation[f"{name}_gradcam"] = data_url
+            explanation[f"{name}_gradcam"] = data_url
 
         final_prediction = CLASS_NAMES[final_idx]
         agreement, agreement_score = self._agreement(individual)
         probabilities = {
             CLASS_NAMES[i]: float(final_probs[0, i].item()) for i in range(len(CLASS_NAMES))
         }
+        reference_probabilities = (
+            {CLASS_NAMES[i]: float(reference_probs[0, i].item()) for i in range(len(CLASS_NAMES))}
+            if reference_probs is not None
+            else probabilities
+        )
+        reference_confidence = float(reference_probs.max().item()) if reference_probs is not None else final_confidence
+        reference_prediction = (
+            CLASS_NAMES[int(reference_probs.argmax(dim=1).item())]
+            if reference_probs is not None
+            else final_prediction
+        )
 
         return {
             "prediction": final_prediction,
+            "prediction_source": PRODUCTION_PREDICTION_SOURCE,
+            "production_model": PRODUCTION_MODEL_NAME,
             "confidence": round(final_confidence * 100, 2),
             "confidence_score": final_confidence,
             "final_prediction": final_prediction,
             "final_confidence": round(final_confidence * 100, 2),
             "models": individual,
             "individual_models": individual,
-            "ensemble_prediction": final_prediction,
-            "ensemble_confidence": final_confidence,
-            "ensemble_probabilities": probabilities,
+            "production_prediction": final_prediction,
+            "production_confidence": final_confidence,
+            "production_probabilities": probabilities,
+            "ensemble_prediction": reference_prediction,
+            "ensemble_confidence": reference_confidence,
+            "ensemble_probabilities": reference_probabilities,
             "individual_model_predictions": individual,
             "class_probabilities": probabilities,
             "probability_risk_band": self._risk_band(final_prediction, final_confidence),
-            "risk_score": 1.0 - probabilities.get("Normal", 0.0),
+            "risk_score": probabilities.get("Disease", 0.0),
             "model_agreement": agreement,
             "model_agreement_score": agreement_score,
             "loaded_models": list(self.models.keys()),

@@ -34,13 +34,11 @@ export default function PatientDrawer({
 }) {
   const latest = selectedPrediction || history[0] || null;
   const recommendation =
-    latest?.PredictionResult === "Disease Detected"
+    latest?.PredictionResult === "Disease"
       ? "Arrange prompt clinician review and confirm the screening result."
-      : latest?.PredictionResult === "At-Risk"
-        ? "Schedule follow-up and reduce modifiable cardiovascular risk factors."
-        : latest?.PredictionResult === "Normal"
-          ? "Continue routine screening and healthy prevention habits."
-          : "Run screening to generate patient guidance.";
+      : latest?.PredictionResult === "Normal"
+        ? "Continue routine screening and healthy prevention habits."
+        : "Run screening to generate patient guidance.";
   const imageSrc = mediaUrl(apiBase, token, latest?.ImagePath);
   const heatmapSrc = mediaUrl(apiBase, token, latest?.ExplanationPath);
 

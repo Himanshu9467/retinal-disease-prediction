@@ -18,8 +18,26 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import jwt
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "database"))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_env_file(env_path: Path):
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
+
+
+_load_env_file(PROJECT_ROOT / ".env")
+
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(PROJECT_ROOT / "database"))
 
 from ensemble import RetinalRiskEnsemble
 from model_registry import (
@@ -36,14 +54,21 @@ logger = logging.getLogger("retinarisk.api")
 # ─────────────────────────────────────────────
 #  Config
 # ─────────────────────────────────────────────
-DEFAULT_JWT_SECRET = "change-me-dev-retinarisk"
-SECRET_KEY   = os.environ.get("JWT_SECRET", DEFAULT_JWT_SECRET)
-ALGORITHM    = "HS256"
-TOKEN_EXPIRE = 60 * 24
-MODEL_NAME   = os.environ.get("MODEL_NAME", "ensemble")
-IMG_SIZE     = int(os.environ.get("IMG_SIZE", 224))
+JWT_SECRET   = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is required. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+    )
+ALGORITHM    = os.environ.get("JWT_ALGORITHM", "HS256")
+TOKEN_EXPIRE = int(os.environ.get("JWT_EXPIRE_MINUTES", "1440"))
+MODEL_NAME   = os.environ.get("MODEL_NAME", "efficientnet")
+IMG_SIZE     = int(os.environ.get("IMG_SIZE", 300))
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR    = PROJECT_ROOT / "outputs"
+MODEL_OUTPUT_DIR = Path(
+    os.environ.get("MODEL_REGISTRY_DIR", PROJECT_ROOT / "research_training_outputs2")
+).resolve()
+OUTPUT_DIR    = MODEL_OUTPUT_DIR
 UPLOAD_DIR   = PROJECT_ROOT / "uploads"
 GRADCAM_DIR  = OUTPUT_DIR / "gradcam"
 CAPTURE_DIR  = UPLOAD_DIR / "captures"
@@ -65,11 +90,11 @@ CORS_ORIGINS = [
 ]
 
 MODEL_LABELS = {
-    "cnn": "Custom CNN",
-    "custom_cnn": "Custom CNN",
-    "resnet": "ResNet",
-    "efficientnet": "EfficientNet",
-    "vit": "ViT",
+    "cnn": "CNN",
+    "custom_cnn": "CNN",
+    "resnet": "ResNet50",
+    "mobilenet": "MobileNetV3-Large",
+    "efficientnet": "EfficientNet-B3",
     "ensemble": "Ensemble",
 }
 
@@ -85,11 +110,23 @@ MODEL_NAME_TO_KEY = {
     "custom_cnn": "cnn",
     "custom cnn": "cnn",
     "resnet": "resnet",
+    "resnet50": "resnet",
+    "mobilenet": "mobilenet",
+    "mobilenetv3": "mobilenet",
+    "mobilenetv3 large": "mobilenet",
     "efficientnet": "efficientnet",
-    "vit": "vit",
-    "vision transformer": "vit",
+    "efficientnet b3": "efficientnet",
     "ensemble": "ensemble",
 }
+
+PRIMARY_PRODUCTION_MODEL_KEY = "efficientnet"
+PRIMARY_PRODUCTION_MODEL_NAME = "EfficientNet-B3"
+PRODUCTION_MODEL_NAMES = {"EfficientNet-B3", "ResNet50", "MobileNetV3-Large", "CNN"}
+
+
+def _normalize_result(value):
+    normalized = str(value or "").strip()
+    return "Normal" if normalized == "Normal" else "Disease"
 
 
 def _safe_float(value, default=0.0):
@@ -125,7 +162,7 @@ def _registry_metric_payload(entry):
         "accuracy": _safe_float(metrics.get("accuracy")),
         "precision": _safe_float(metrics.get("precision")),
         "recall": _safe_float(metrics.get("recall")),
-        "f1_score": _safe_float(metrics.get("weighted_f1", metrics.get("f1"))),
+        "f1_score": _safe_float(metrics.get("macro_f1", metrics.get("weighted_f1", metrics.get("f1")))),
     }
 
 
@@ -291,13 +328,13 @@ def _upsert_ensemble_registry_row():
         precision=weighted["precision"],
         recall=weighted["recall"],
         f1_score=weighted["f1"],
-        checkpoint_path="ensemble:efficientnet,resnet,vit",
+        checkpoint_path="ensemble:efficientnet,resnet,mobilenet,cnn",
     )
 
 
 def sync_models_from_outputs():
     """
-    Sync the Model table from the active outputs/ production registry.
+    Sync the Model table from the active research_training_outputs2 production registry.
     """
     synced = 0
     current_ids = {}
@@ -317,17 +354,12 @@ def sync_models_from_outputs():
         synced += 1
 
     _merge_stale_model_rows(current_ids)
-    _upsert_ensemble_registry_row()
-    ensemble = db.get_model_by_name("Ensemble")
-    if ensemble:
-        current_ids["ensemble"] = ensemble["ModelID"]
-    _merge_stale_model_rows(current_ids)
     return synced
 
 
 def _merge_stale_model_rows(current_ids):
     """
-    Keep metadata rows anchored to the current outputs/ registry.
+    Keep metadata rows anchored to the current research_training_outputs2 registry.
     Older non-current rows are merged so predictions keep a valid ModelID.
     """
     for row in db.get_all_models():
@@ -344,7 +376,7 @@ def _merge_stale_model_rows(current_ids):
 def _dedupe_models_by_algorithm():
     """
     Backward-compatible wrapper for older callers.
-    Current behavior keeps rows anchored to active outputs/ registry IDs.
+    Current behavior keeps rows anchored to active research_training_outputs2 registry IDs.
     """
     current_ids = {}
     for model_key, entry in MODEL_REGISTRY.items():
@@ -402,11 +434,11 @@ security = HTTPBearer()
 def create_token(user_id, email, role):
     payload = {"sub": str(user_id), "email": email, "role": role,
                "exp": datetime.utcnow() + timedelta(minutes=TOKEN_EXPIRE)}
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
-        return jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
@@ -444,10 +476,7 @@ class ChecklistUpdate(BaseModel):
 # ─────────────────────────────────────────────
 @app.on_event("startup")
 def startup():
-    if APP_ENV == "production" and SECRET_KEY == DEFAULT_JWT_SECRET:
-        raise RuntimeError("JWT_SECRET must be set in production.")
-    if SECRET_KEY == DEFAULT_JWT_SECRET:
-        logger.warning("Using development JWT secret. Set JWT_SECRET before deployment.")
+
     db.init_db()
     try:
         get_ensemble()
@@ -591,19 +620,24 @@ def run_prediction(img_path: str, patient_id: int):
         logger.exception("Prediction failed for patient %s image %s", patient_id, img_path)
         raise HTTPException(500, f"Prediction failed: {exc}")
 
-    final_risk = inference.get("retinal_severity") or inference.get("prediction")
-    confidence = float(inference.get("ensemble_confidence") or inference.get("confidence_score") or 0.0)
+    final_risk = _normalize_result(inference.get("retinal_severity") or inference.get("prediction"))
+    confidence = float(
+        inference.get("production_confidence")
+        or inference.get("confidence_score")
+        or inference.get("ensemble_confidence")
+        or 0.0
+    )
 
     explanation_path = None
-    for key in ("efficientnet_gradcam", "resnet_gradcam", "vit_gradcam"):
+    for key in ("efficientnet_gradcam", "resnet_gradcam", "mobilenet_gradcam", "cnn_gradcam"):
         maybe_data_url = inference.get("explainability", {}).get(key)
         if maybe_data_url:
             explanation_path = _save_data_url_image(maybe_data_url, prefix=key)
             if explanation_path:
                 break
 
-    ensemble_model = db.get_model_by_name("Ensemble")
-    model_id = ensemble_model["ModelID"] if ensemble_model else None
+    production_model = db.get_model_by_name(PRIMARY_PRODUCTION_MODEL_NAME)
+    model_id = production_model["ModelID"] if production_model else None
     if model_id is None:
         best_model_row = db.get_best_model()
         model_id = best_model_row["ModelID"] if best_model_row else None
@@ -618,13 +652,17 @@ def run_prediction(img_path: str, patient_id: int):
 
     return {
         "prediction": final_risk,
+        "prediction_source": inference.get("prediction_source", PRIMARY_PRODUCTION_MODEL_KEY),
+        "production_model": inference.get("production_model", PRIMARY_PRODUCTION_MODEL_NAME),
         "confidence_percent": round(confidence * 100, 2),
         "models": inference.get("models", inference.get("individual_model_predictions", {})),
         "prediction_id": stored["PredictionID"],
         "patient_id": patient_id,
         "result": final_risk,
         "confidence": round(confidence, 4),
-        "class_probabilities": inference["ensemble_probabilities"],
+        "class_probabilities": inference.get("production_probabilities", inference["class_probabilities"]),
+        "production_confidence": inference.get("production_confidence", confidence),
+        "production_probabilities": inference.get("production_probabilities", inference["class_probabilities"]),
         "ensemble_confidence": inference["ensemble_confidence"],
         "ensemble_probabilities": inference["ensemble_probabilities"],
         "ensemble_probability": inference["ensemble_confidence"],
@@ -692,7 +730,7 @@ def stream_camera(camera_index: int = 0, token: Optional[str] = None):
     if not token:
         raise HTTPException(401, "Token required")
     try:
-        jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
@@ -780,7 +818,7 @@ def get_media(path: str, token: Optional[str] = None):
     if not token:
         raise HTTPException(401, "Token required")
     try:
-        jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
@@ -821,8 +859,7 @@ def generate_patient_report(patient_id: int, token=Depends(verify_token)):
     risk = latest.get("PredictionResult", "Not screened")
     confidence = latest.get("ConfidenceScore")
     guidance = {
-        "Disease Detected": "Arrange prompt clinician or ophthalmology review and confirm the retinal screening result.",
-        "At-Risk": "Schedule follow-up retinal review and assess relevant clinical risk factors.",
+        "Disease": "Arrange prompt clinician or ophthalmology review and confirm the retinal screening result.",
         "Normal": "Continue routine screening and healthy prevention habits.",
     }.get(risk, "Run retinal screening to generate a recommendation.")
     lines = [
@@ -863,22 +900,28 @@ def generate_patient_report(patient_id: int, token=Depends(verify_token)):
 @app.get("/models")
 def list_models(token=Depends(verify_token)):
     sync_models_from_outputs()
-    return db.get_all_models()
+    return [model for model in db.get_all_models() if model.get("AlgorithmName") in PRODUCTION_MODEL_NAMES]
 
 
 @app.get("/model-info")
 def model_info():
     return {
         "status": "ready" if _ensemble_service and _ensemble_service.models else "configured",
-        "class_order": ["At-Risk", "Disease Detected", "Normal"],
+        "class_order": ["Normal", "Disease"],
         "registry": registry_as_dict(MODEL_REGISTRY),
         "ensemble_weights": ENSEMBLE_WEIGHTS,
+        "prediction_source": PRIMARY_PRODUCTION_MODEL_KEY,
+        "production_model": PRIMARY_PRODUCTION_MODEL_NAME,
+        "production_strategy_note": (
+            "EfficientNet-B3 is the active production predictor because it has the best "
+            "registered validation/test metrics. Other models remain available for comparison."
+        ),
         "loaded_models": list(_ensemble_service.models.keys()) if _ensemble_service else [],
         "excluded_models": [
             name for name, weight in ENSEMBLE_WEIGHTS.items() if weight <= 0 and name in MODEL_REGISTRY
         ],
         "model_output_dir": str(OUTPUT_DIR),
-        "metrics_source": "outputs/history.json or outputs/<model>_history.json",
+        "metrics_source": "research_training_outputs2/all_models_summary.csv and metrics_<model>.csv",
         "active_checkpoints": {
             name: entry.checkpoint for name, entry in MODEL_REGISTRY.items() if entry.weight > 0
         },
@@ -891,7 +934,7 @@ def sync_model_registry(token=Depends(require_doctor)):
     return {
         "success": True,
         "synced_models": synced,
-        "models": db.get_all_models(),
+        "models": [model for model in db.get_all_models() if model.get("AlgorithmName") in PRODUCTION_MODEL_NAMES],
     }
 
 @app.get("/health")

@@ -15,6 +15,18 @@ from datetime import datetime
 DB_PATH = os.environ.get("CVD_DB_PATH", "./database/cvd_system.db")
 
 
+def _normalize_prediction_result(value):
+    normalized = str(value or "").strip()
+    return "Normal" if normalized == "Normal" else "Disease"
+
+
+def _normalize_prediction_row(row):
+    data = dict(row)
+    if "PredictionResult" in data:
+        data["PredictionResult"] = _normalize_prediction_result(data["PredictionResult"])
+    return data
+
+
 def get_connection():
     os.makedirs(Path(DB_PATH).parent, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -79,7 +91,7 @@ def init_db():
         PredictionID    INTEGER PRIMARY KEY AUTOINCREMENT,
         PatientID       INTEGER NOT NULL REFERENCES Patient(PatientID) ON DELETE CASCADE,
         ModelID         INTEGER REFERENCES Model(ModelID),
-        PredictionResult TEXT   NOT NULL CHECK(PredictionResult IN ('Normal','At-Risk','Disease Detected')),
+        PredictionResult TEXT   NOT NULL CHECK(PredictionResult IN ('Normal','Disease')),
         ConfidenceScore REAL    NOT NULL,
         ExplanationPath TEXT,
         Timestamp       TEXT    DEFAULT (datetime('now'))
@@ -99,9 +111,51 @@ def init_db():
     if "Phone" not in columns:
         c.execute("ALTER TABLE Patient ADD COLUMN Phone TEXT NOT NULL DEFAULT ''")
 
+    _migrate_prediction_binary_schema(conn)
+
+    c.execute(
+        "UPDATE Prediction SET PredictionResult='Disease' WHERE PredictionResult <> 'Normal'"
+    )
+
     conn.commit()
     conn.close()
     print(f"[DB] Initialised at {DB_PATH}")
+
+
+def _migrate_prediction_binary_schema(conn):
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='Prediction'"
+    ).fetchone()
+    table_sql = row["sql"] if row else ""
+    if "PredictionResult IN ('Normal','Disease')" in table_sql:
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS Prediction_binary (
+            PredictionID    INTEGER PRIMARY KEY AUTOINCREMENT,
+            PatientID       INTEGER NOT NULL REFERENCES Patient(PatientID) ON DELETE CASCADE,
+            ModelID         INTEGER REFERENCES Model(ModelID),
+            PredictionResult TEXT   NOT NULL CHECK(PredictionResult IN ('Normal','Disease')),
+            ConfidenceScore REAL    NOT NULL,
+            ExplanationPath TEXT,
+            Timestamp       TEXT    DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("""
+        INSERT INTO Prediction_binary (
+            PredictionID, PatientID, ModelID, PredictionResult,
+            ConfidenceScore, ExplanationPath, Timestamp
+        )
+        SELECT
+            PredictionID, PatientID, ModelID,
+            CASE WHEN PredictionResult='Normal' THEN 'Normal' ELSE 'Disease' END,
+            ConfidenceScore, ExplanationPath, Timestamp
+        FROM Prediction
+    """)
+    conn.execute("DROP TABLE Prediction")
+    conn.execute("ALTER TABLE Prediction_binary RENAME TO Prediction")
+    conn.execute("PRAGMA foreign_keys = ON")
 
 
 # ─────────────────────────────────────────────
@@ -390,7 +444,7 @@ def save_prediction(patient_id, model_id, prediction_result,
     cur  = conn.execute(
         "INSERT INTO Prediction (PatientID, ModelID, PredictionResult, "
         "ConfidenceScore, ExplanationPath) VALUES (?,?,?,?,?)",
-        (patient_id, model_id, prediction_result, confidence_score, explanation_path)
+        (patient_id, model_id, _normalize_prediction_result(prediction_result), confidence_score, explanation_path)
     )
     conn.commit()
     pred_id = cur.lastrowid
@@ -412,7 +466,7 @@ def get_patient_predictions(patient_id):
         (patient_id,)
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [_normalize_prediction_row(r) for r in rows]
 
 
 def get_all_predictions(limit=100):
@@ -432,7 +486,7 @@ def get_all_predictions(limit=100):
         (limit,)
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [_normalize_prediction_row(r) for r in rows]
 
 
 def get_prediction(prediction_id):
@@ -446,7 +500,7 @@ def get_prediction(prediction_id):
         (prediction_id,),
     ).fetchone()
     conn.close()
-    return dict(row) if row else None
+    return _normalize_prediction_row(row) if row else None
 
 
 def delete_prediction(prediction_id):
@@ -477,7 +531,7 @@ def delete_all_predictions():
 def get_prediction_stats():
     conn = get_connection()
     stats = {}
-    for result in ["Normal", "At-Risk", "Disease Detected"]:
+    for result in ["Normal", "Disease"]:
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM Prediction WHERE PredictionResult=?",
             (result,)

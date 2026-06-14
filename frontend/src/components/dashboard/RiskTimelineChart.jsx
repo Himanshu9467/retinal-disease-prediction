@@ -1,13 +1,11 @@
 const RISK_VALUE = {
   Normal: 1,
-  "At-Risk": 2,
-  "Disease Detected": 3,
+  Disease: 2,
 };
 
 const VALUE_LABEL = {
   1: "Normal",
-  2: "At-Risk",
-  3: "Disease",
+  2: "Disease",
 };
 
 function formatDate(value) {
@@ -24,7 +22,7 @@ export default function RiskTimelineChart({ predictions, onSelect }) {
 
   const points = ordered.map((row, index) => {
     const x = ordered.length <= 1 ? 50 : 8 + (index / (ordered.length - 1)) * 84;
-    const y = 86 - ((RISK_VALUE[row.PredictionResult] || 1) - 1) * 36;
+    const y = 86 - ((RISK_VALUE[row.PredictionResult] || 1) - 1) * 72;
     return { row, x, y };
   });
   const path = points
@@ -41,10 +39,10 @@ export default function RiskTimelineChart({ predictions, onSelect }) {
       ) : (
         <>
           <svg className="risk-timeline-chart" viewBox="0 0 100 100" role="img">
-            {[1, 2, 3].map((value) => (
+            {[1, 2].map((value) => (
               <g key={value}>
-                <line x1="8" x2="94" y1={86 - (value - 1) * 36} y2={86 - (value - 1) * 36} />
-                <text x="1" y={89 - (value - 1) * 36}>{VALUE_LABEL[value]}</text>
+                <line x1="8" x2="94" y1={86 - (value - 1) * 72} y2={86 - (value - 1) * 72} />
+                <text x="1" y={89 - (value - 1) * 72}>{VALUE_LABEL[value]}</text>
               </g>
             ))}
             <path d={path} />

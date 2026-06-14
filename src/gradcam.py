@@ -38,11 +38,19 @@ class GradCAM:
         if not torch.isfinite(logits).all():
             raise RuntimeError("Model produced non-finite logits during GradCAM")
 
-        if target_class is None:
-            target_class = logits.argmax(dim=1).item()
+        flat_logits = logits.float().view(logits.size(0), -1)
+        if flat_logits.size(1) == 1:
+            disease_score = flat_logits[0, 0]
+            if target_class is None:
+                target_class = int(torch.sigmoid(disease_score).item() >= 0.5)
+            score = disease_score if int(target_class) == 1 else -disease_score
+        else:
+            if target_class is None:
+                target_class = int(flat_logits.argmax(dim=1).item())
+            score = flat_logits[0, int(target_class)]
 
         self.model.zero_grad()
-        logits[0, target_class].backward()
+        score.backward()
 
         if self.gradients is None or self.activations is None:
             raise RuntimeError("GradCAM hooks did not capture activations and gradients")
@@ -63,6 +71,7 @@ def overlay_cam(img_pil, cam, alpha=0.5):
     if cam is None or not np.isfinite(cam).all():
         raise RuntimeError("Invalid GradCAM heatmap")
     cam_resized = cv2.resize(cam, (w, h))
+    cam_resized = _mask_to_retinal_field(img_np, cam_resized)
     cam_uint8   = (cam_resized * 255).astype(np.uint8)
     heatmap     = cv2.applyColorMap(cam_uint8, cv2.COLORMAP_JET)
     heatmap     = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
@@ -70,14 +79,47 @@ def overlay_cam(img_pil, cam, alpha=0.5):
     return Image.fromarray(overlaid)
 
 
+def _mask_to_retinal_field(img_np, cam):
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    _, mask = cv2.threshold(gray, 18, 255, cv2.THRESH_BINARY)
+    kernel = np.ones((15, 15), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.GaussianBlur(mask, (31, 31), 0).astype(np.float32) / 255.0
+    masked = cam * mask
+    masked -= masked.min()
+    masked /= masked.max() + 1e-8
+    return masked
+
+
+def _last_conv_layer(module):
+    for child in reversed(list(module.children())):
+        if isinstance(child, torch.nn.Conv2d):
+            return child
+        found = _last_conv_layer(child)
+        if found is not None:
+            return found
+    return None
+
+
+def _module_path(root, path):
+    module = root
+    for part in path:
+        module = module[part] if isinstance(part, int) else getattr(module, part)
+    return module
+
+
 def get_target_layer(model, model_name):
     name = model_name.lower()
     base_model = getattr(model, "model", model)
     if name in {"cnn", "custom_cnn", "customcnn"}:
-        return base_model.features[12]
+        return base_model.features[-2]
     elif name == "resnet":
-        return getattr(base_model.layer4[-1], "conv3", base_model.layer4[-1].conv2)
-    elif name == "efficientnet":return base_model.features[-1]
+        return base_model.layer4[-1]
+    elif name == "efficientnet":
+        return _module_path(base_model.features, [6, -1])
+    elif name in {"efficientnet", "mobilenet", "mobilenetv3", "mobilenetv3_large"}:
+        return base_model.features[-1]
     else:
         raise ValueError(f"Grad-CAM not supported for '{name}'. Use ViT Attention Rollout.")
 

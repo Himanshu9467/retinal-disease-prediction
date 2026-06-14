@@ -1,197 +1,384 @@
-# RetinaRisk Retinal Image Prediction
+# CardioVision AI:
+# Cardiovascular Disease Prediction Using Retinal Fundus Images and Deep Learning
 
-RetinaRisk is a full-stack retinal image screening system for academic demonstration and portfolio presentation. It classifies retinal fundus images into `Normal`, `At-Risk`, and `Disease Detected` categories using a calibrated ensemble of EfficientNet-B3, ResNet34, and ViT-B16 models. The system includes a FastAPI backend, React frontend, model registry, prediction history, GradCAM explainability, and health/model metadata endpoints.
+CardioVision AI is an AI-powered healthcare platform for cardiovascular disease risk screening from retinal fundus images. It combines a FastAPI backend, React/Vite frontend, SQLite database, JWT authentication, and PyTorch production models.
 
-This project is a clinical decision-support prototype. It is not a standalone diagnosis system.
+## Overview
 
-## 1. Project Overview
+### Problem Statement
 
-The project combines deep learning inference with a practical web workflow:
+Cardiovascular disease can progress silently, and early risk screening is often limited by access to specialist diagnostics. Retinal fundus images contain vascular biomarkers that can support non-invasive risk assessment and clinical triage.
 
-- Upload or capture a retinal image.
-- Run ensemble inference from the current `outputs/` production artifacts.
-- Return class probabilities, confidence, agreement, and GradCAM visualization.
-- Store patient and prediction history for review.
-- Present results in a clinician-facing dashboard.
+### Objective
 
-## 2. Problem Statement
+Build a full-stack clinical AI platform that accepts retinal fundus images, performs binary disease risk prediction, stores patient and prediction history, and presents analytics through a secure dashboard.
 
-Manual retinal screening can be time-consuming and requires specialist interpretation. This project explores whether deep learning models can support early triage by classifying retinal fundus images into clinically useful severity bands while keeping patient-level data leakage under control during model development.
+### Solution
 
-## 3. Features
+The system uses EfficientNet-B3 as the active production predictor because it has the best registered test metrics. ResNet50, MobileNetV3-Large, CNN, and a weighted ensemble reference remain available for comparison and review.
 
-- Patient-safe train/validation/test split.
-- Production registry for model checkpoints and metrics.
-- EfficientNet-B3, ResNet34, ViT-B16, and excluded baseline Custom CNN.
-- Weighted ensemble inference.
-- Temperature calibration per model.
-- Probability normalization and model agreement reporting.
-- GradCAM and ViT attention explainability support.
-- FastAPI endpoints for health, metadata, prediction, GradCAM, patients, and reports.
-- React dashboard with upload, prediction rendering, confidence display, history, analytics, and error handling.
+## Features
 
-## 4. Architecture Diagram
+- Secure login and registration with JWT authentication
+- Retinal image upload and live capture support
+- AI prediction for binary Normal/Disease classification
+- Best-model production prediction with model comparison metrics
+- Dashboard analytics and prediction history
+- Patient management and clinical follow-up checklist
+- Explainability support through Grad-CAM artifacts
+- Model registry and production model metrics
+- Responsive React frontend for clinical workflows
 
-```mermaid
-flowchart TD
-  A[React Frontend] --> B[FastAPI Backend]
-  B --> C[Upload Validation and Patient Context]
-  C --> D[Ensemble Engine]
-  D --> E[EfficientNet-B3]
-  D --> F[ResNet34]
-  D --> G[ViT-B16]
-  E --> H[Temperature Calibration]
-  F --> H
-  G --> H
-  H --> I[Weighted Probability Ensemble]
-  I --> J[Prediction Response]
-  I --> K[GradCAM / Attention Explainability]
-  J --> L[Dashboard Rendering]
-  K --> L
+## Technologies Used
+
+### Frontend
+
+- React
+- Vite
+- lucide-react
+
+### Backend
+
+- FastAPI
+- Uvicorn
+- Pydantic
+- PyJWT
+
+### AI/ML
+
+- PyTorch
+- Torchvision
+- EfficientNet-B3
+- ResNet50
+- MobileNetV3-Large
+- CNN
+- EfficientNet-B3 production inference
+- Ensemble soft voting reference
+
+### Database
+
+- SQLite
+
+## Dataset
+
+The training pipeline uses patient-level splitting to reduce leakage risk and balanced binary classes for Normal and Disease classification.
+
+### Dataset Statistics
+
+| Split | Normal | Disease | Total |
+| --- | ---: | ---: | ---: |
+| Train | 2800 | 2800 | 5600 |
+| Validation | 350 | 350 | 700 |
+| Test | 350 | 350 | 700 |
+
+## Model Performance
+
+Final test metrics are stored in `research_training_outputs2/test_summary_<model>.json`.
+
+| Model | Accuracy | Precision | Recall | Macro F1 | ROC AUC | PR AUC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| EfficientNet-B3 | 95.14% | 98.77% | 91.43% | 95.14% | 99.03% | 99.22% |
+| ResNet50 | 93.14% | 96.60% | 89.43% | 93.13% | 98.57% | 98.78% |
+| MobileNetV3-Large | 93.43% | 98.41% | 88.29% | 93.41% | 98.49% | 98.62% |
+| CNN | 86.57% | 95.07% | 77.14% | 86.45% | 95.01% | 95.62% |
+| Weighted ensemble reference | 93.54% | 97.89% | 88.97% | 93.52% | 99.13% | |
+
+## Production Model Selection
+
+EfficientNet-B3 is the active production model because it is higher than the weighted ensemble reference on the current registered accuracy and macro F1 shown by the dashboard.
+
+Weighted ensemble reference configuration:
+
+```json
+{
+  "efficientnet": 0.50,
+  "resnet": 0.20,
+  "mobilenet": 0.20,
+  "cnn": 0.10
+}
 ```
 
-## 5. Dataset Description
+The API reports production predictions with `"prediction_source": "efficientnet"` and `"production_model": "EfficientNet-B3"`.
 
-The dataset is organized into retinal severity classes:
+Expected loaded model keys:
 
-- `Normal`
-- `At-Risk`
-- `Disease Detected`
-
-The project includes patient-safe split artifacts in `research_patient_safe_aug_dataset/`, including split summaries and leakage audit files. The production inference artifacts are stored in `outputs/`.
-
-## 6. Data Pipeline
-
-1. Source retinal images and labels are prepared into structured CSV files.
-2. Patient-level identifiers are used to avoid leakage across train, validation, and test splits.
-3. Images are resized and normalized for ImageNet-style model backbones.
-4. Optional augmentation is used during model development.
-5. Final production inference reads only from `outputs/` checkpoints and histories.
-
-## 7. Models Used
-
-- EfficientNet-B3: active ensemble member.
-- ResNet34: active ensemble member.
-- ViT-B16: active ensemble member.
-- Custom CNN: retained in registry for transparency, excluded from production ensemble with zero weight.
-
-## 8. Ensemble Strategy
-
-The production ensemble uses fixed normalized weights:
-
-- EfficientNet-B3: `0.358974`
-- ResNet34: `0.358974`
-- ViT-B16: `0.282051`
-- Custom CNN: `0.000000`
-
-Each model output is temperature-calibrated, converted to probabilities with softmax, normalized, and then combined by weighted averaging. The final probability vector is normalized again before selecting the predicted class.
-
-## 9. GradCAM Explainability
-
-For CNN-style backbones, GradCAM highlights image regions contributing to the selected prediction. For ViT, attention rollout is attempted when attention maps are available. The backend stores generated explainability images under `outputs/gradcam/` and exposes them through `/gradcam/{prediction_id}`.
-
-## 10. Results Table
-
-Latest validation metrics from `outputs/*_history.json`:
-
-| Model | Accuracy | Weighted F1 | Macro F1 | ROC-AUC |
-| ----- | -------- | ----------- | -------- | ------- |
-| EfficientNet-B3 | 0.8257 | 0.8190 | 0.8084 | 0.9288 |
-| ResNet34 | 0.8212 | 0.8174 | 0.8079 | 0.9220 |
-| ViT-B16 | 0.8220 | 0.8199 | 0.8069 | 0.9097 |
-| Custom CNN | 0.7586 | 0.7437 | 0.7231 | 0.8791 |
-
-| Model | Parameters | Role |
-| ----- | ---------- | ---- |
-| EfficientNet-B3 | 10,700,843 | Active ensemble classifier |
-| ResNet34 | 21,286,211 | Active ensemble classifier |
-| ViT-B16 | 85,800,963 | Active ensemble classifier |
-| Custom CNN | 422,659 | Baseline retained in registry, excluded from ensemble |
-
-## 11. API Documentation
-
-Core public/system endpoints:
-
-| Method | Endpoint | Purpose |
-| ------ | -------- | ------- |
-| `GET` | `/health` | Backend readiness and loaded model status |
-| `GET` | `/model-info` | Production registry, weights, active checkpoints |
-| `POST` | `/auth/register` | Create a user |
-| `POST` | `/auth/login` | Authenticate and receive a bearer token |
-| `GET` | `/patients` | List patients |
-| `POST` | `/patients` | Create a patient |
-| `POST` | `/predict` | Upload image and run prediction |
-| `GET` | `/gradcam/{prediction_id}` | Return stored GradCAM image |
-| `GET` | `/models` | List synced model metadata |
-| `POST` | `/models/sync` | Sync registry metadata into the database |
-
-Example prediction request:
-
-```bash
-curl -X POST http://127.0.0.1:8001/predict \
-  -H "Authorization: Bearer <token>" \
-  -F "patient_id=1" \
-  -F "image=@sample_retina.jpg"
+```json
+[
+  "efficientnet",
+  "resnet",
+  "mobilenet",
+  "cnn"
+]
 ```
 
-## 12. Installation
+Runtime verification confirmed:
 
-Use Python 3.9+ and Node.js 20+.
+- All four checkpoint files exist in `research_training_outputs2`.
+- All four models load successfully.
+- EfficientNet-B3 is used for the final production probability.
+- The weighted ensemble probability is retained as a secondary comparison signal.
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
+Example verification output:
+
+| Model | Disease Probability |
+| --- | ---: |
+| EfficientNet-B3 | 0.3473 |
+| ResNet50 | 0.4276 |
+| MobileNetV3-Large | 0.7002 |
+| CNN | 0.8340 |
+| Weighted Ensemble Reference | 0.5773 |
+
+Manual weighted average: `0.5773`
+
+## Project Structure
+
+```text
+Retinal-image-prediction/
+├── api/
+│   ├── app.py
+│   ├── database/
+│   │   └── cvd_system.db
+│   └── uploads/
+├── data/
+│   ├── train.csv
+│   ├── val.csv
+│   ├── test.csv
+│   ├── labels.csv
+│   └── prepare_data.py
+├── database/
+│   ├── database.py
+│   └── cvd_system.db
+├── frontend/
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── vite.config.js
+│   └── src/
+│       ├── App.jsx
+│       ├── App.css
+│       ├── index.css
+│       ├── main.jsx
+│       └── components/
+│           └── dashboard/
+├── research_binary_7000/
+├── research_patient_safe_aug_dataset/
+├── research_training_outputs2/
+│   ├── best_efficientnet.pt
+│   ├── best_resnet.pt
+│   ├── best_mobilenet.pt
+│   ├── best_cnn.pt
+│   ├── test_summary_efficientnet.json
+│   ├── test_summary_resnet.json
+│   ├── test_summary_mobilenet.json
+│   ├── test_summary_cnn.json
+│   └── all_models_summary.csv
+├── src/
+│   ├── ensemble/
+│   │   └── ensemble.py
+│   ├── capture.py
+│   ├── dataset.py
+│   ├── gradcam.py
+│   ├── model_registry.py
+│   ├── production_models.py
+│   └── train.py
+├── uploads/
+├── requirements.txt
+└── README.md
+```
+
+## Screenshots
+
+Add presentation screenshots here:
+
+- Login page: `docs/screenshots/login.png`
+- Dashboard: `docs/screenshots/dashboard.png`
+- Prediction workflow: `docs/screenshots/prediction.png`
+- Analytics: `docs/screenshots/analytics.png`
+
+## API Endpoints
+
+Backend base URL: `http://127.0.0.1:8001`
+
+| Method | Endpoint | Purpose | Auth |
+| --- | --- | --- | --- |
+| `POST` | `/auth/login` | Login and receive JWT token | No |
+| `POST` | `/auth/register` | Create user account | No |
+| `GET` | `/auth/me` | Validate current token | Yes |
+| `POST` | `/predict` | Upload retinal image and generate prediction | Yes |
+| `GET` | `/predictions` | Prediction history | Yes |
+| `DELETE` | `/predictions/{prediction_id}` | Delete prediction | Yes |
+| `GET` | `/stats` | Dashboard statistics | Yes |
+| `GET` | `/models` | Production analytics model list | Yes |
+| `POST` | `/models/sync` | Sync model metrics into database | Doctor |
+| `GET` | `/model-info` | Model registry metadata | No |
+| `GET` | `/health` | Backend health status | No |
+
+Swagger UI: `http://127.0.0.1:8001/docs`
+
+## Security
+
+### JWT Secret Configuration (Required)
+
+The backend requires a `JWT_SECRET` environment variable. **The server will not start without it.**
+
+#### Step 1 — Generate a Strong Secret
+
+**PowerShell:**
+
+```powershell
+[guid]::NewGuid().ToString() + [guid]::NewGuid().ToString()
+```
+
+**Python:**
+
+```python
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+#### Step 2 — Create `.env` File
+
+Copy the example file and set your generated secret:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Edit `.env` and replace the placeholder:
+
+```env
+JWT_SECRET=your_generated_secret_here
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=1440
+```
+
+#### Step 3 — Start Backend
+
+```powershell
+uvicorn api.app:app --host 127.0.0.1 --port 8001 --reload
+```
+
+#### Step 4 — Verify Authentication
+
+Open Swagger UI at `http://127.0.0.1:8001/docs` and test login.
+
+> **⚠️ WARNING: Never commit your `.env` file or real secrets to version control.**
+>
+> **⚠️ WARNING: Never use placeholder or development secrets in production.**
+>
+> The `.gitignore` file is configured to exclude `.env` automatically.
+
+### Security Details
+
+- Authentication uses JWT bearer tokens.
+- Protected endpoints require `Authorization: Bearer <token>`.
+- `JWT_SECRET` is **mandatory** — the backend fails at startup if it is missing.
+- JWT algorithm and token expiration are configurable via `JWT_ALGORITHM` and `JWT_EXPIRE_MINUTES`.
+- API responses include no-store cache headers for most endpoints.
+- Media paths are validated to stay inside approved upload/output directories.
+
+### Production Environment Example
+
+```powershell
+$env:APP_ENV="production"
+$env:JWT_SECRET="replace-with-a-strong-64-byte-minimum-secret"
+```
+
+## How To Run Project
+
+### Backend
+
+1. Create `.env` from the example file:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+   Edit `.env` and set a strong `JWT_SECRET` (see Security section above).
+
+2. Create virtual environment:
+
+```powershell
+python -m venv venv
+```
+
+3. Activate on Windows:
+
+```powershell
+venv\Scripts\activate
+```
+
+4. Install dependencies:
+
+```powershell
 pip install -r requirements.txt
+```
 
+5. Start backend:
+
+```powershell
+uvicorn api.app:app --host 127.0.0.1 --port 8001 --reload
+```
+
+Backend URL:
+
+```text
+http://127.0.0.1:8001
+```
+
+Swagger:
+
+```text
+http://127.0.0.1:8001/docs
+```
+
+### Frontend
+
+1. Enter frontend:
+
+```powershell
 cd frontend
+```
+
+2. Install packages:
+
+```powershell
 npm install
 ```
 
-## 13. Running Backend
+3. Start frontend:
 
-From the project root:
-
-```bash
-python -m uvicorn api.app:app --host 127.0.0.1 --port 8001 --reload
-```
-
-Recommended production/demo environment variables:
-
-```bash
-set JWT_SECRET=<32-plus-character-secret>
-set CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
-set RETINAL_REJECTION_ENABLED=1
-```
-
-## 14. Running Frontend
-
-From `frontend/`:
-
-```bash
+```powershell
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. If the backend is on a different URL, set:
+Frontend URL:
 
-```bash
-set VITE_API_BASE=http://127.0.0.1:8001
+```text
+http://localhost:5173
 ```
 
-## 15. Example Screenshots
+If the backend runs on a different URL, set `VITE_API_BASE` before starting Vite.
 
-Repository visual artifacts:
+## Validation Checklist
 
-- `outputs/efficientnet_confusion_matrix.png`
-- `outputs/resnet_confusion_matrix.png`
-- `outputs/vit_confusion_matrix.png`
-- `outputs/gradcam/` for generated GradCAM examples after inference
+Completed final validation:
 
-For a final portfolio README, add dashboard screenshots under a `docs/screenshots/` folder and link them here.
+- Model registry contains EfficientNet-B3, ResNet50, MobileNetV3-Large, and CNN.
+- Ensemble weights use Configuration A: EfficientNet-B3 `0.50`, ResNet50 `0.20`, MobileNetV3-Large `0.20`, CNN `0.10`.
+- Backend startup smoke check passed.
+- Backend `/health` returned `ok` after lifespan startup.
+- `/models` returned only EfficientNet-B3, ResNet50, MobileNetV3-Large, and CNN.
+- Frontend lint passed.
+- Frontend production build passed.
+- `requirements.txt`, `frontend/package.json`, and `frontend/package-lock.json` are present.
 
-## 16. Future Improvements
+## Remaining Production Notes
 
-- Add a dedicated test suite with isolated temporary databases.
-- Add Docker Compose for reproducible demo deployment.
-- Add CI checks for backend import, frontend lint/build, and registry validation.
-- Add model cards with dataset limitations and subgroup evaluation.
-- Add secure production storage for uploaded images and generated explanations.
+- Set `JWT_SECRET` before production deployment.
+- Keep model checkpoints in `research_training_outputs2` or set `MODEL_REGISTRY_DIR`.
+- The current registry supports flat artifact filenames such as `best_efficientnet.pt`; nested model folders are optional.
+- Add final UI screenshots before presentation submission.
+- Run deployment-specific network, HTTPS, and backup checks in the target hosting environment.
+
+## Disclaimer
+
+CardioVision AI is a clinical decision-support and screening tool. It is not a standalone diagnosis system. Final medical interpretation, treatment, and follow-up decisions must be made by qualified clinicians.
